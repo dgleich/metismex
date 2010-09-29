@@ -14,11 +14,16 @@
 * Note that error checking is not done: make sure A is structurally
 * symmetric or it will crash.
 *
-* To compile, you need to have Metis 4, and do something like
-*   mex -I<metis.h directory> -L<libmetis.a directory> -lmetis metismex.c
-*   mex -g -largeArrayDims -I../include -I../libmetis -I../GKlib/trunk -L../build/Linux-x86_64/ -lmetis metismex.c -DLINUX -DUNIX
+* To compile, you need to have Metis 5, and do something like
+   mex -O -largeArrayDims -I../include -I../libmetis -I../GKlib/trunk ...
+     -L../build/Linux-x86_64/ -lmetis metismex.c -DLINUX -DUNIX
+* If you get unreferenced symbol errors __get_tls_addr, for instance, then
+* I found:
+   mex LDFLAGS='-pthread -shared -Wl,--version-script,\$TMW_ROOT/extern/lib/\$Arch/\$MAPFILE' ...
+     -O -largeArrayDims -I../include -I../libmetis -I../GKlib/trunk ...
+     -L../build/Linux-x86_64/ -lmetis metismex.c -DLINUX -DUNIX
 *
-* Robert Bridson
+* Robert Bridson (and David F. Gleich)
 *****************************************************************************/
 
 /**

@@ -75,3 +75,15 @@ also work on 9.04.  I could _not_ get this to work on Ubuntu 6.06.
         
              6     7     8     9    10
 
+Notes
+-----
+
+### Compiling on ubuntu 6.06
+For ubuntu 6.06, I had to be use the following compile line:
+    mex LDFLAGS='-pthread -shared -Wl,--version-script,\$TMW_ROOT/extern/lib/\$Arch/\$MAPFILE' ...
+     -O -largeArrayDims -I../include -I../libmetis -I../GKlib/trunk ...
+     -L../build/Linux-x86_64/ -lmetis metismex.c -DLINUX -DUNIX
+The problem with the standard linker line is that it throws an undefined
+symbol command for things that occur in error cases.  I guess this might
+cause problems if metis errors out... but at least it works for simple
+cases.
