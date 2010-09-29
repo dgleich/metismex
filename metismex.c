@@ -240,6 +240,10 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             }
         }
 
+        if (nparts < 2) { 
+            mexErrMsgTxt("nparts must be at least 2");
+        }
+
         /* Allocate memory for result of call */
         part = (idxtype*) mxCalloc (n, sizeof(idxtype));
 
@@ -278,6 +282,10 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             for (i = 1; i < 4; ++i) {
                 options[i] = (idxtype) optarray[i-1];
             }
+        }
+        
+        if (nparts < 2) { 
+            mexErrMsgTxt("nparts must be at least 2");
         }
 
         /* Allocate memory for result of call */
