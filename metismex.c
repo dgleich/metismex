@@ -14,9 +14,8 @@
 * Note that error checking is not done: make sure A is structurally
 * symmetric or it will crash.
 *
-* To compile, you need to have Metis 5, and do something like
-   mex -O -largeArrayDims -I../include -I../libmetis -I../GKlib/trunk ...
-     -L../build/Linux-x86_64/ -lmetis metismex.c -DLINUX -DUNIX
+* To compile, you need to have Metis 5, and do something like (OSX)
+  mex -O -largeArrayDims -I../include -I../libmetis -I../GKlib -L../build/Darwin-x86_64/libmetis -lmetis metismex.c -D__thread= -DLINUX
 * If you get unreferenced symbol errors __get_tls_addr, for instance, then
 * I found:
    mex LDFLAGS='-pthread -shared -Wl,--version-script,\$TMW_ROOT/extern/lib/\$Arch/\$MAPFILE' ...
@@ -46,20 +45,14 @@ We cannot change the typewidth from within matlab because
 it depends on how metis was compiled, we can just throw an error
 if it was compiled incorrectly.
 #ifdef MX_COMPAT_32
-#define IDXTYPEWIDTH 32
+#define idx_tWIDTH 32
 #else
-#define IDXTYPEWIDTH 64
+#define idx_tWIDTH 64
 #endif
 */
 /* MX_COMPAT_32 */
 
-#include <GKlib.h>
-#include <metis.h>
-#include <defs.h>
-#include <struct.h>
-#include <macros.h>
-#include <rename.h>
-#include <proto.h>
+#include <metislib.h>
 
 /*************************************************************************
 * Given a graph, find a node separator bisecting it (roughly). The number
@@ -67,14 +60,14 @@ if it was compiled incorrectly.
 * array bnds, which should already be allocated to have enough room.
 **************************************************************************/
 #if 0
-void METIS_NodeBisect(idxtype nvtxs, idxtype *xadj, idxtype *adjncy,
-                      idxtype *vwgt, idxtype *adjwgt, idxtype wgtflag,
-                      idxtype *options, idxtype *nbnd, idxtype *bnds, double unbalance)
+void METIS_NodeBisect(idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
+                      idx_t *vwgt, idx_t *adjwgt, idx_t wgtflag,
+                      idx_t *options, idx_t *nbnd, idx_t *bnds, double unbalance)
 {
-  idxtype i, j, tvwgt, tpwgts2[2];
+  idx_t i, j, tvwgt, tpwgts2[2];
   GraphType graph;
   CtrlType ctrl;
-  idxtype *label, *bndind;
+  idx_t *label, *bndind;
 
   if (options[0] == 0) {  /* Use the default parameters */
     ctrl.CType   = ONMETIS_CTYPE;
@@ -126,8 +119,8 @@ void METIS_NodeBisect(idxtype nvtxs, idxtype *xadj, idxtype *adjncy,
 }
 #endif
 
-void convertMatrix (const mxArray *A, idxtype **xadj, idxtype **adjncy,
-                    idxtype **vwgt, idxtype **adjwgt)
+void convertMatrix (const mxArray *A, idx_t **xadj, idx_t **adjncy,
+                    idx_t **vwgt, idx_t **adjwgt)
 {
     mwIndex i, j, jbar, n, nnz, *jc, *ir;
     double *pr;
@@ -140,10 +133,10 @@ void convertMatrix (const mxArray *A, idxtype **xadj, idxtype **adjncy,
     pr = mxGetPr(A);
 
     /* Allocate room for METIS's structure */
-    *xadj = (idxtype*) mxCalloc (n+1, sizeof(idxtype));
-    *adjncy = (idxtype*) mxCalloc (nnz, sizeof(idxtype));
-    *vwgt = (idxtype*) mxCalloc (n, sizeof(idxtype));
-    *adjwgt = (idxtype*) mxCalloc (nnz, sizeof(idxtype));
+    *xadj = (idx_t*) mxCalloc (n+1, sizeof(idx_t));
+    *adjncy = (idx_t*) mxCalloc (nnz, sizeof(idx_t));
+    *vwgt = (idx_t*) mxCalloc (n, sizeof(idx_t));
+    *adjwgt = (idx_t*) mxCalloc (nnz, sizeof(idx_t));
 
     /* Scan the matrix, not copying diagonal terms, and rounding doubles
      * to integer weights */
@@ -153,10 +146,10 @@ void convertMatrix (const mxArray *A, idxtype **xadj, idxtype **adjncy,
         for (j = jc[i-1]; j < jc[i]; j++) {
             if (ir[j] != i-1) {
                 (*adjncy)[jbar] = ir[j];
-                (*adjwgt)[jbar] = (idxtype) pr[j];
+                (*adjwgt)[jbar] = (idx_t) pr[j];
                 jbar++;
             } else {
-                (*vwgt)[i-1] = (idxtype) pr[j];
+                (*vwgt)[i-1] = (idx_t) pr[j];
             }
         }
         (*xadj)[i] = jbar;
@@ -190,8 +183,8 @@ void convertMatrix (const mxArray *A, idxtype **xadj, idxtype **adjncy,
 *****************************************************************************/
 void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
-    idxtype i, n, nparts, wgtflag, options[8] = {0}, numflag = 0, edgecut, sepsize;
-    idxtype *xadj, *adjncy, *vwgt, *adjwgt, *part, *perm, *iperm, *sep;
+    idx_t i, n, nparts, wgtflag, options[METIS_NOPTIONS] = {0}, edgecut, sepsize;
+    idx_t *xadj, *adjncy, *vwgt, *adjwgt, *part, *perm, *iperm, *sep;
     char funcname[FUNCNAMELEN];
     double *optarray, *partpr, *permpr, *ipermpr, *seppr;
 
@@ -207,12 +200,15 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         mexErrMsgTxt ("Second parameter must be a symmetric sparse matrix");
     }
     
-    idxtype seed = -1;
+    idx_t seed = -1;
     if (nrhs > 5) {
-        seed = (idxtype)mxGetScalar(SEED_IN);
+        seed = (idx_t)mxGetScalar(SEED_IN);
     }
     
     InitRandom(seed);
+    
+    METIS_SetDefaultOptions(options);
+    options[METIS_OPTION_SEED] = seed;
 
     /* Copy the matrix over, getting rid of diagonal, and converting to
      * integer weights */
@@ -227,16 +223,22 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         if (nrhs < 3) {
             mexErrMsgTxt ("Third parameter needed: nparts");
         }
-        nparts = (idxtype) mxGetScalar (NPARTS_IN);
+        nparts = (idx_t) mxGetScalar (NPARTS_IN);
         if (nrhs >= 4) {
-            wgtflag = (idxtype) mxGetScalar (WGTFLAG_IN);
+            wgtflag = (idx_t) mxGetScalar (WGTFLAG_IN);
         } else {
             wgtflag = 0;
         }
+        if (wgtflag == 0) {
+            for (i=0; i<n; ++i) {
+                vwgt[i] = 1;
+            }
+        }
+        
         if (nrhs >= 5) {
             optarray = mxGetPr (PARTOPTS_IN);
             for (i = 1; i < 4; ++i) {
-                options[i] = (idxtype) optarray[i-1];
+                options[i] = (idx_t) optarray[i-1];
             }
         }
 
@@ -245,11 +247,18 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         }
 
         /* Allocate memory for result of call */
-        part = (idxtype*) mxCalloc (n, sizeof(idxtype));
+        part = (idx_t*) mxCalloc (n, sizeof(idx_t));
+        
+        idx_t ncon = 1;
+        idx_t* vsize = (idx_t*)mxMalloc(sizeof(idx_t)*n);
+        for (i=0; i<n; ++i) { 
+            vsize[i] = 1;
+        }
 
         /* Do the call */
-        METIS_PartGraphRecursive (&n, xadj, adjncy, vwgt, adjwgt, &wgtflag,
-                                  &numflag, &nparts, options, &edgecut, part);
+        int rval = METIS_PartGraphRecursive (&n, &ncon, xadj, adjncy, vwgt, vsize, adjwgt, 
+                &nparts, NULL, NULL, options, &edgecut, part);
+        mexPrintf("metis returned: %i\n", rval);
 
         /* Figure out output values */
         if (nlhs >= 1) {
@@ -271,16 +280,16 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         if (nrhs < 3) {
             mexErrMsgTxt ("Third parameter needed: nparts");
         }
-        nparts = (idxtype) mxGetScalar (NPARTS_IN);
+        nparts = (idx_t) mxGetScalar (NPARTS_IN);
         if (nrhs >= 4) {
-            wgtflag = (idxtype) mxGetScalar (WGTFLAG_IN);
+            wgtflag = (idx_t) mxGetScalar (WGTFLAG_IN);
         } else {
             wgtflag = 0;
         }
         if (nrhs >= 5) {
             optarray = mxGetPr (PARTOPTS_IN);
             for (i = 1; i < 4; ++i) {
-                options[i] = (idxtype) optarray[i-1];
+                options[i] = (idx_t) optarray[i-1];
             }
         }
         
@@ -289,11 +298,13 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         }
 
         /* Allocate memory for result of call */
-        part = (idxtype*) mxCalloc (n, sizeof(idxtype));
+        part = (idx_t*) mxCalloc (n, sizeof(idx_t));
+        
+        idx_t ncon = 1;
 
         /* Do the call */
-        METIS_PartGraphKway (&n, xadj, adjncy, vwgt, adjwgt, &wgtflag,
-                             &numflag, &nparts, options, &edgecut, part);
+        METIS_PartGraphKway (&n, &ncon, xadj, adjncy, vwgt, NULL, adjwgt, 
+                &nparts, NULL, NULL, options, &edgecut, part);
 
         /* Figure out output values */
         if (nlhs >= 1) {
@@ -315,16 +326,16 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         if (nrhs >= 3) {
             optarray = mxGetPr (NDOPTS_IN);
             for (i = 1; i < 4; ++i) {
-                options[i] = (idxtype) optarray[i-1];
+                options[i] = (idx_t) optarray[i-1];
             }
         }
 
         /* Allocate memory for result of call */
-        perm = (idxtype*) mxCalloc (n, sizeof(idxtype));
-        iperm = (idxtype*) mxCalloc (n, sizeof(idxtype));
+        perm = (idx_t*) mxCalloc (n, sizeof(idx_t));
+        iperm = (idx_t*) mxCalloc (n, sizeof(idx_t));
 
         /* Do the call */
-        METIS_EdgeND (&n, xadj, adjncy, &numflag, options, perm, iperm);
+        METIS_NodeND (&n, xadj, adjncy, NULL, options, perm, iperm);
 
         /* Figure out output values */
         if (nlhs >= 1) {
@@ -349,19 +360,19 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         if (nrhs >= 3) {
             optarray = mxGetPr (NDOPTS_IN);
             for (i = 1; i < 4; ++i) {
-                options[i] = (idxtype) optarray[i-1];
+                options[i] = (idx_t) optarray[i-1];
             }
             for (i = 5; i < 8; ++i) {
-                options[i] = (idxtype) optarray[i-2];
+                options[i] = (idx_t) optarray[i-2];
             }
         }
 
         /* Allocate memory for result of call */
-        perm = (idxtype*) mxCalloc (n, sizeof(idxtype));
-        iperm = (idxtype*) mxCalloc (n, sizeof(idxtype));
+        perm = (idx_t*) mxCalloc (n, sizeof(idx_t));
+        iperm = (idx_t*) mxCalloc (n, sizeof(idx_t));
 
         /* Do the call */
-        METIS_NodeND (&n, xadj, adjncy, &numflag, options, perm, iperm);
+        METIS_NodeND (&n, xadj, adjncy, NULL, options, perm, iperm);
 
         /* Figure out output values */
         if (nlhs >= 1) {
@@ -383,19 +394,19 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     } else if (strcasecmp(funcname,"NodeBisect")==0) {
 
         if (nrhs >= 3) {
-            wgtflag = (idxtype) mxGetScalar (NBWGTFLAG_IN);
+            wgtflag = (idx_t) mxGetScalar (NBWGTFLAG_IN);
         } else {
             wgtflag = 0;
         }
         if (nrhs >= 4) {
             optarray = mxGetPr (NBOPTS_IN);
             for (i = 1; i < 4; ++i) {
-                options[i] = (idxtype) optarray[i-1];
+                options[i] = (idx_t) optarray[i-1];
             }
         }
 
         /* Allocate memory for result of call */
-        sep = (idxtype*) mxCalloc (n, sizeof(idxtype));
+        sep = (idx_t*) mxCalloc (n, sizeof(idx_t));
 
         /* Do the call */
         METIS_NodeBisect (n, xadj, adjncy, vwgt, adjwgt, wgtflag,
