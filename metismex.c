@@ -1,26 +1,19 @@
 /****************************************************************************
 * metismex.c
-* Public domain MATLAB CMEX-file to let you use METIS-4.0 from MATLAB.
-* Usage:
-* [part,edgecut] = metismex('PartGraphRecursive',A,nparts,wgtflag,options)
-* [part,edgecut] = metismex('PartGraphKway',A,nparts,wgtflag,options)
-* [perm,iperm] = metismex('EdgeND',A,options)
-* [perm,iperm] = metismex('NodeND',A,options)
-* sep = metismex('NodeBisect',A,wgtflag,options)
+* Public domain MATLAB CMEX-file to let you use METIS-5.0 from MATLAB.
 *
-* Output arguments, along with the wgtflag and options input arguments,
-* are optional. See the METIS manual for the meanings of the arguments.
+* Usage:
+* [part,edgecut] = metismex('PartGraphRecursive',A,nparts,options)
+* Output arguments, along with options, are optional
 *
 * Note that error checking is not done: make sure A is structurally
 * symmetric or it will crash.
 *
 * To compile, you need to have Metis 5, and do something like (OSX)
-  mex -O -largeArrayDims -I../include -I../libmetis -I../GKlib -L../build/Darwin-x86_64/libmetis -lmetis metismex.c -D__thread= -DLINUX
-* If you get unreferenced symbol errors __get_tls_addr, for instance, then
-* I found:
-   mex LDFLAGS='-pthread -shared -Wl,--version-script,\$TMW_ROOT/extern/lib/\$Arch/\$MAPFILE' ...
-     -O -largeArrayDims -I../include -I../libmetis -I../GKlib/trunk ...
-     -L../build/Linux-x86_64/ -lmetis metismex.c -DLINUX -DUNIX
+* OSX
+*   mex -O -largeArrayDims -I../include -I../libmetis -I../GKlib -L../build/Darwin-x86_64/libmetis -lmetis metismex.c -D__thread= -DLINUX
+* LINUX
+*   mex -O -largeArrayDims -I../include -I../libmetis -I../GKlib -L../build/Darwin-x86_64/libmetis -lmetis metismex.c -DLINUX
 *
 * Robert Bridson (and David F. Gleich)
 *****************************************************************************/
@@ -39,18 +32,16 @@ typedef int mwSize;
 
 #include <strings.h>
 
-
-/* 
-We cannot change the typewidth from within matlab because
-it depends on how metis was compiled, we can just throw an error
-if it was compiled incorrectly.
-#ifdef MX_COMPAT_32
-#define idx_tWIDTH 32
+#if IDXTYPEWIDTH == 32
+#  ifdef MX_COMPAT_32
+#  else 
+#  error(32-bit metis is not compatible with 64-bit matlab, edit metis.h and recompile)
+#  endif
 #else
-#define idx_tWIDTH 64
+#  ifdef MX_COMPAT_32
+#  error(64-bit metis is not compatible with 32-bit matlab, edit metis.h and recompile)
+#  endif
 #endif
-*/
-/* MX_COMPAT_32 */
 
 #include <metislib.h>
 
@@ -156,25 +147,123 @@ void convertMatrix (const mxArray *A, idx_t **xadj, idx_t **adjncy,
     }
 }
 
+struct string_map_data {
+    char *name;
+    int val;
+};
+static struct string_map_data ctypeMap[] = {
+  {"rb",                 METIS_PTYPE_RB},
+  {"kway",               METIS_PTYPE_KWAY},
+  {NULL,                 0}
+};
+
+static struct string_map_data iptypeMap[] = {
+  {"rm",                 METIS_CTYPE_RM},
+  {"shem",               METIS_CTYPE_SHEM},
+  {NULL,                 0}
+};
+
+static struct string_map_data objtypeMap[] = {
+  {"cut",                METIS_OBJTYPE_CUT},
+  {"vol",                METIS_OBJTYPE_VOL},
+  {NULL,                 0}
+};
+
+int parseString(mxArray* arg, struct string_map_data* map, char *argname) {
+    char argval[25];
+    if (!mxIsChar(arg)) {
+      mexErrMsgIdAndTxt("metismex:invalidValue",
+          "the value for option %s must be a string",
+          argname);
+    }
+    
+    mxGetString (arg, argval, 25);
+    while (map->name != NULL) {
+        if (strcasecmp(map->name,argval) == 0) {
+            return map->val;
+        }
+        map++; 
+    }
+    mexErrMsgIdAndTxt("metismex:invalidValue",
+          "the value %s for option %s is unrecognized",
+          argval,argname);
+}
+
+struct option {
+    char *name; 
+    int has_arg; /* 1 => int arg, 0 => no arg, -1 => custom arg */
+    int val;
+};
+
+static struct option option_names[] = {
+ {"seed", 1, METIS_OPTION_SEED},
+ {"ctype", -1, METIS_OPTION_CTYPE},
+ {"iptype", -1, METIS_OPTION_IPTYPE},
+ {"objtype", -1, METIS_OPTION_OBJTYPE},
+ {"minconn", 0, METIS_OPTION_MINCONN},
+ {"contig", 0, METIS_OPTION_CONTIG},
+ {"ufactor", 1, METIS_OPTION_UFACTOR},
+ {"niter", 1, METIS_OPTION_NITER},
+ {"ncuts",  1, METIS_OPTION_NCUTS},
+ {"tpwgts", -1, METIS_OPTION_TPWGTS},
+ {"ubvec", -1, METIS_OPTION_UBVEC},
+ {NULL, 0, 0},
+}; 
+
+struct parameter_data  {
+  int wgtflag;
+};
+
+void parseOptions(const mxArray *optarg, idx_t *options, struct parameter_data* params)
+{
+    struct option* opt = option_names;
+    mxAssert(mxIsStruct(optarg), "options argument must be a structure");
+    while (opt->name != NULL) {
+        mxArray* mopt=mxGetField(optarg, 0, opt->name);
+        if (mopt) {
+            if (opt->has_arg == 1) {
+                options[opt->val] = (int)mxGetScalar(mopt);
+            } else if (opt->has_arg == 0) {
+                options[opt->val] = 1;
+            } else {
+                switch (opt->val) {
+                case METIS_OPTION_CTYPE:
+                options[opt->val] = parseString(mopt, ctypeMap, opt->name);
+                break;
+                case METIS_OPTION_IPTYPE:
+                options[opt->val] = parseString(mopt, iptypeMap, opt->name);
+                break;
+                case METIS_OPTION_OBJTYPE:
+                options[opt->val] = parseString(mopt, objtypeMap, opt->name);
+                break;
+                case METIS_OPTION_TPWGTS:
+                mxAssert(0, "tpwgts not handled");
+                break;
+                case METIS_OPTION_UBVEC:
+                mxAssert(0, "ubvec not handled");
+                break;
+                default:
+                    mxAssert(0, "unhandled option");
+                }
+            }
+        }
+        opt++;
+    }
+}
+
+
 
 #define FUNC_IN (prhs[0])
 #define A_IN (prhs[1])
 #define NPARTS_IN (prhs[2])
-#define WGTFLAG_IN (prhs[3])
-#define PARTOPTS_IN (prhs[4])
-#define NDOPTS_IN (prhs[2])
 #define NBWGTFLAG_IN (prhs[2])
 #define NBOPTS_IN (prhs[3])
-
-#define SEED_IN (prhs[5])
 
 #define PART_OUT (plhs[0])
 #define EDGECUT_OUT (plhs[1])
 #define PERM_OUT (plhs[0])
 #define IPERM_OUT (plhs[1])
 #define SEP_OUT (plhs[0])
-
-
 
 #define FUNCNAMELEN 25
 
@@ -183,13 +272,15 @@ void convertMatrix (const mxArray *A, idx_t **xadj, idx_t **adjncy,
 *****************************************************************************/
 void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
-    idx_t i, n, nparts, wgtflag, options[METIS_NOPTIONS] = {0}, edgecut, sepsize;
+    idx_t i, n, nparts, wgtflag=0, options[METIS_NOPTIONS] = {0}, edgecut, sepsize;
     idx_t *xadj, *adjncy, *vwgt, *adjwgt, *part, *perm, *iperm, *sep;
+    
     char funcname[FUNCNAMELEN];
     double *optarray, *partpr, *permpr, *ipermpr, *seppr;
+    struct parameter_data params;
 
     /* First do some general argument checking */
-    if (nrhs < 2 || nrhs > 6 || nlhs > 2) {
+    if (nrhs < 2 || nrhs > 4 || nlhs > 2) {
         mexErrMsgTxt ("Wrong # of arguments");
     }
     if (!mxIsChar(FUNC_IN)) {
@@ -199,16 +290,8 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     if (!mxIsSparse(A_IN) || n!=mxGetM(A_IN)) {
         mexErrMsgTxt ("Second parameter must be a symmetric sparse matrix");
     }
-    
-    idx_t seed = -1;
-    if (nrhs > 5) {
-        seed = (idx_t)mxGetScalar(SEED_IN);
-    }
-    
-    InitRandom(seed);
-    
+
     METIS_SetDefaultOptions(options);
-    options[METIS_OPTION_SEED] = seed;
 
     /* Copy the matrix over, getting rid of diagonal, and converting to
      * integer weights */
@@ -217,7 +300,8 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     /* Now figure out which function we have to do */
     mxGetString (FUNC_IN, funcname, FUNCNAMELEN);
 
-    if (strcasecmp(funcname,"PartGraphRecursive")==0) {
+    if (strcasecmp(funcname,"PartGraphRecursive")==0 ||
+        strcasecmp(funcname,"PartGraphKway")==0 ) {
 
         /* Figure out values for nparts, wgtflag and options */
         if (nrhs < 3) {
@@ -225,22 +309,14 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         }
         nparts = (idx_t) mxGetScalar (NPARTS_IN);
         if (nrhs >= 4) {
-            wgtflag = (idx_t) mxGetScalar (WGTFLAG_IN);
-        } else {
-            wgtflag = 0;
+            parseOptions(prhs[3], options, &params); 
         }
+        
         if (wgtflag == 0) {
             for (i=0; i<n; ++i) {
                 vwgt[i] = 1;
             }
-        }
-        
-        if (nrhs >= 5) {
-            optarray = mxGetPr (PARTOPTS_IN);
-            for (i = 1; i < 4; ++i) {
-                options[i] = (idx_t) optarray[i-1];
-            }
-        }
+        }        
 
         if (nparts < 2) { 
             mexErrMsgTxt("nparts must be at least 2");
@@ -256,55 +332,15 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         }
 
         /* Do the call */
-        int rval = METIS_PartGraphRecursive (&n, &ncon, xadj, adjncy, vwgt, vsize, adjwgt, 
+        if (strcasecmp(funcname,"PartGraphRecursive") == 0) {
+            METIS_PartGraphRecursive (&n, &ncon, xadj, adjncy, vwgt, vsize, adjwgt, 
                 &nparts, NULL, NULL, options, &edgecut, part);
-        mexPrintf("metis returned: %i\n", rval);
-
-        /* Figure out output values */
-        if (nlhs >= 1) {
-            PART_OUT = mxCreateDoubleMatrix (1, n, mxREAL);
-            partpr = mxGetPr (PART_OUT);
-            for (i = 0; i < n; i++) {
-                partpr[i] = (double) part[i];
-            }
-
-            if (nlhs >= 2) {
-                EDGECUT_OUT = mxCreateDoubleMatrix (1, 1, mxREAL);
-                mxGetPr(EDGECUT_OUT)[0] = (double) edgecut;
-            }
-        }
-
-    } else if (strcasecmp(funcname,"PartGraphKway")==0) {
-
-        /* Figure out values for nparts, wgtflag and options */
-        if (nrhs < 3) {
-            mexErrMsgTxt ("Third parameter needed: nparts");
-        }
-        nparts = (idx_t) mxGetScalar (NPARTS_IN);
-        if (nrhs >= 4) {
-            wgtflag = (idx_t) mxGetScalar (WGTFLAG_IN);
+        } else if (strcasecmp(funcname, "PartGraphKway") == 0) {
+            METIS_PartGraphKway (&n, &ncon, xadj, adjncy, vwgt, vsize, adjwgt, 
+                &nparts, NULL, NULL, options, &edgecut, part);
         } else {
-            wgtflag = 0;
+            mxAssert(0,"unhandled case");
         }
-        if (nrhs >= 5) {
-            optarray = mxGetPr (PARTOPTS_IN);
-            for (i = 1; i < 4; ++i) {
-                options[i] = (idx_t) optarray[i-1];
-            }
-        }
-        
-        if (nparts < 2) { 
-            mexErrMsgTxt("nparts must be at least 2");
-        }
-
-        /* Allocate memory for result of call */
-        part = (idx_t*) mxCalloc (n, sizeof(idx_t));
-        
-        idx_t ncon = 1;
-
-        /* Do the call */
-        METIS_PartGraphKway (&n, &ncon, xadj, adjncy, vwgt, NULL, adjwgt, 
-                &nparts, NULL, NULL, options, &edgecut, part);
 
         /* Figure out output values */
         if (nlhs >= 1) {
@@ -320,51 +356,12 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             }
         }
 
-    } else if (strcasecmp(funcname,"EdgeND")==0) {
+    } else if (strcasecmp(funcname,"EdgeND")==0 || 
+               strcasecmp(funcname,"NodeND")==0) {
 
         /* Figure out values for options */
         if (nrhs >= 3) {
-            optarray = mxGetPr (NDOPTS_IN);
-            for (i = 1; i < 4; ++i) {
-                options[i] = (idx_t) optarray[i-1];
-            }
-        }
-
-        /* Allocate memory for result of call */
-        perm = (idx_t*) mxCalloc (n, sizeof(idx_t));
-        iperm = (idx_t*) mxCalloc (n, sizeof(idx_t));
-
-        /* Do the call */
-        METIS_NodeND (&n, xadj, adjncy, NULL, options, perm, iperm);
-
-        /* Figure out output values */
-        if (nlhs >= 1) {
-            PERM_OUT = mxCreateDoubleMatrix (1, n, mxREAL);
-            permpr = mxGetPr (PERM_OUT);
-            for (i = 0; i < n; i++) {
-                permpr[i] = perm[i]+1.0;
-            }
-
-            if (nlhs >= 2) {
-                IPERM_OUT = mxCreateDoubleMatrix (1, n, mxREAL);
-                ipermpr = mxGetPr (IPERM_OUT);
-                for (i = 0; i < n; i++) {
-                    ipermpr[i] = iperm[i]+1.0;
-                }
-            }
-        }
-
-    } else if (strcasecmp(funcname,"NodeND")==0) {
-
-        /* Figure out values for options */
-        if (nrhs >= 3) {
-            optarray = mxGetPr (NDOPTS_IN);
-            for (i = 1; i < 4; ++i) {
-                options[i] = (idx_t) optarray[i-1];
-            }
-            for (i = 5; i < 8; ++i) {
-                options[i] = (idx_t) optarray[i-2];
-            }
+            parseOptions(prhs[2], options, &params); 
         }
 
         /* Allocate memory for result of call */
@@ -422,7 +419,8 @@ void mexFunction (int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         }
 #endif    
     } else {
-        mexErrMsgTxt ("Unknown metismex function");
+        mexErrMsgIdAndTxt ("metismex:invalidValue","Unknown metismex function %s",
+            funcname);
     }
 }
 
