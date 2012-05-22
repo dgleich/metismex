@@ -15,8 +15,8 @@ All functions except for one (NodeBisect) currently work.
 Compiling
 ---------
 
-The following instructions worked on Ubuntu linux (10.4), I think they 
-also work on 9.04.  I could _not_ get this to work on Ubuntu 6.06.
+The following instructions worked on Ubuntu Linux (10.10) and
+OSX 10.7.
 
 1. Download and extract the 5.0.2 version of 
   [metis](http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/metis-5.0.2.tar.gz).
