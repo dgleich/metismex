@@ -24,7 +24,7 @@ picture = max(size(xy)) > 1;
 
 if nargin<3, randseed=-1; end
 
-map = metismex('PartGraphRecursive',A,2,0,[0 0 0 0],randseed);
+map = metismex('PartGraphRecursive',A,2,struct('seed',randseed));
 [p1,p2] = other(map);
 
 if picture

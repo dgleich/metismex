@@ -50,7 +50,7 @@ OSX 10.7.
 
 7. Check that it works
 
-        >> A = spaugment(ones(5)); A(1,10) = 1; A(10,1) = 1; A(5,6) = 1; A(6,5) = 1;
+        >> A = blkdiag(ones(5),ones(5)); A(1,10) = 1; A(10,1) = 1; A(5,6) = 1; A(6,5) = 1;
         >> [p1,p2] = metispart(sparse(A))
         
         p1 =
