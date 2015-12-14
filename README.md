@@ -22,8 +22,8 @@ OSX 10.7.
   [metis](http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/metis-5.0.2.tar.gz).
   
         wget http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/metis-5.0.2.tar.gz
-        tar xzvf metis-5.0pre2.tar.gz
-        cd metis-5.0pre2/
+        tar xzvf metis-5.0.2.tar.gz
+        cd metis-5.0.2/
     
 
 2. Configure metis for 64-bit integers.  _This step is only required
@@ -32,7 +32,7 @@ OSX 10.7.
   On my system, this change was to line 33.
   
 3. Make sure you have a working version of `cmake` installed.  On OSX 10.7,
-  I used the homebrew port. `brew install cmake`  
+  I used the [homebrew](http://brew.sh) port. `brew install cmake`  
   
 5. Compile metis.
       
